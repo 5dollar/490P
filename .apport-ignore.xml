@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<apport>
+  <ignore mtime="1460111846" program="/usr/lib/erlang/erts-7.3/bin/beam.smp"/>
+</apport>

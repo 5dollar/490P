@@ -1,0 +1,77 @@
+language: erlang
+
+otp_release:
+  - 17.5
+
+addons:
+  apt:
+    packages:
+    - curl
+    - xsltproc
+
+cache:
+  apt: true
+  directories:
+    - $HOME/.cache/plt
+    - $HOME/.cache/bin
+
+install:
+  - pip install --user codecov
+  - export PATH=$PATH:$HOME/.local/bin
+
+before_script:
+  - git checkout -B "${TRAVIS_TAG:-${TRAVIS_BRANCH}}"
+  - |
+    if [ ! -e $HOME/.cache/bin/etcd ]; then
+      mkdir -p $HOME/.cache/bin
+      (set -e
+       cd $HOME/.cache/bin
+       curl -L https://github.com/coreos/etcd/releases/download/v2.3.7/etcd-v2.3.7-linux-amd64.tar.gz -o etcd.tar.gz
+       tar -xz --strip-components=1 -f etcd.tar.gz
+      )
+    fi
+    export USE_ETCD=$HOME/.cache/bin/etcd
+
+script:
+  - make RABBITMQ_CURRENT_FETCH_URL=https://github.com/rabbitmq/rabbitmq-trick-erlang.mk-into-using-proper-url-for-deps
+  - make ct COVER=true
+  - |
+    # We want this after ct run, so `rabbit` dependency will be fetched.
+    # Then we can add rabbit/rabbit_common to plt, thus getting 0
+    # warnings after running dialyzer itself
+
+    # Try to use cached plt if it's valid
+    if [ -r $HOME/.cache/plt/.autocluster.plt ]; then
+      cp -va $HOME/.cache/plt/.autocluster.plt .
+      # Cached PLT can become invalid (i.e. reference some renamed/deleted .beam)
+      dialyzer --check_plt --plt ./.autocluster.plt || rm -f ./.autocluster.plt
+    fi
+
+    # Build PLT from scratch if there is no cached copy
+    if [ ! -f ./.autocluster.plt ]; then
+      make plt || true # making plt produces some warnings which we don't care about
+      mkdir -p $HOME/.cache/plt/
+      cp -va .autocluster.plt $HOME/.cache/plt/
+    fi
+  - make dialyze
+
+after_success:
+  - ./bin/covertool -cover ct.coverdata -appname autocluster
+  - codecov -f coverage.xml -X search
+
+before_deploy:
+  - make clean
+  - make dist
+  - tar cvfz autocluster-${TRAVIS_TAG}.tgz plugins/autocluster*.ez plugins/rabbitmq_aws-*.ez
+  - echo "TRAVIS_OTP_RELEASE = ${TRAVIS_OTP_RELEASE}"
+
+deploy:
+  provider: releases
+  api_key:
+    secure: ktklMK+XMOteFt+m9NHhVqKkA1Wo8f9L/cJphUmBMgb3TS+4+vAU50yY8omIyprS8poc3mBWxjYD9p9xdeDnXY2tiFrLDKCWU/jbH3awD0uL6W0Di8BYAVOGhr2Jjjp6gi/B67wHtCtzEoSSNNfMMZ+RWf4GZjJ96NXOLhPRx4k=
+  file: autocluster-${TRAVIS_TAG}.tgz
+  skip_cleanup: true
+  on:
+    condition: "$TRAVIS_OTP_RELEASE = 17.5"
+    tags: true
+    repo: aweber/rabbitmq-autocluster

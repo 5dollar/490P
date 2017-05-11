@@ -1,0 +1,467 @@
+/****************************************************************************
+ * Copyright 2012 VMware, Inc.  All rights reserved. -- VMware Confidential
+ ****************************************************************************/
+
+/**
+ * This is called by Flex check that JRE is installed and at least the minimum version
+ */
+function checkJRE(minimumVersion) {
+    // From Sun's Java Deployment Toolkit code
+    // Modified to return booleans instead of take action
+    var regex = "^(\\d+)(?:\\.(\\d+)(?:\\.(\\d+)(?:_(\\d+))?)?)?$";
+
+    var matchData = minimumVersion.match(regex);
+
+    if (matchData != null) {
+        var browser = deployJava.getBrowser();
+        if ((browser != '?') && ('Safari' != deployJava.browserName2)) {
+            if (deployJava.versionCheck(minimumVersion + '+')) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            // for unknown or Safari - just try to show applet
+            return true;
+        }
+    }
+    return false;
+}
+
+// Patch for Sun's Java Deployment Toolkit code:
+function writeJnlpAppletTagForRemoteService(attributes, parameters) {
+    var appletStr = '<' + 'applet ';
+    var codeAttribute = false;
+    for (var attribute in attributes) {
+        appletStr += ' ' + attribute + '="' + attributes[attribute] + '"';
+        if (attribute == 'code') {
+            codeAttribute = true;
+        }
+    }
+    if (!codeAttribute) {
+        appletStr += ' code="dummy"';
+    }
+    appletStr += '>';
+
+    if (parameters != 'undefined' && parameters != null) {
+        var codebaseParam = false;
+        for (var parameter in parameters) {
+            if (parameter == 'codebase_lookup') {
+                codebaseParam = true;
+            }
+            appletStr += '<param name="' + parameter + '" value="' +  parameters[parameter] + '">';
+
+        }
+        if (!codebaseParam) {
+            appletStr += '<param name="codebase_lookup" value="false">';
+        }
+    }
+    appletStr += '<' + '/' + 'applet' + '>';
+
+    // Insert applet at the end of <body>
+    // Force lazy load of applet by setting innerHTML string. Idea from
+    // http://patrickwebster.blogspot.com/2009/05/lazy-loading-of-javafx-applets.html
+    $('body').append($('<div id="rsAppletContainer"/>'));
+    document.getElementById('rsAppletContainer').style.position = "absolute";
+    document.getElementById('rsAppletContainer').style.left = "1";
+    document.getElementById('rsAppletContainer').style.top = "1";
+    document.getElementById('rsAppletContainer').style.width = "1";
+    document.getElementById('rsAppletContainer').style.height = "1";
+    document.getElementById('rsAppletContainer').innerHTML = appletStr;
+}
+// End patching deployJava.js functions
+
+//prepareRemoteAccessDialog will load modal files asynchronously,
+//so we have to make sure all is loaded safely before the dialog is opened.
+//js (jquery library for modal dialog js)
+//css1 (jquery library for modal dialog css)
+//css2 (launch.css)
+//Then, when css is loaded, it will load
+//launch.html
+//which will load
+//launch.js
+//and then launch.html will open the dialog
+
+var remoteAppletLauncher = {
+    REMOTE_APPLET_ID: 'remoteaccessApplet',
+
+    INITIALIZED     : false,
+
+    JNLP_NAME       : 'remote.jnlp',
+
+    JNLP_PATH       : '/cloud/remoteaccess/',
+
+    progressWindow: null,
+
+    getApplet: function() {
+        return document.getElementById(remoteAppletLauncher.REMOTE_APPLET_ID);
+    },
+
+    initialize: function(listener) {
+        if(remoteAppletLauncher.INITIALIZED) {
+            if(listener != null) {
+                listener();
+            }
+            return remoteAppletLauncher;
+        }
+
+        if(!remoteAppletLauncher.isAppletPresent()) {
+            remoteAppletLauncher.runApplet();
+        }
+
+        remoteAppletLauncher.INITIALIZED = true;
+
+        return remoteAppletLauncher;
+    },
+
+    isAppletPresent: function() {
+        return remoteAppletLauncher.getApplet() != null;
+    },
+
+    isInitialized: function() {
+        return remoteAppletLauncher.INITIALIZED;
+    },
+
+    runApplet: function() {
+        /*
+         * This patches the Sun deploy Java toolkit with a function that
+         * does not use document.writeln to write the applet tag.
+         */
+        deployJava.writeAppletTag = writeJnlpAppletTagForRemoteService;
+
+        var attributes = {
+            id      : remoteAppletLauncher.REMOTE_APPLET_ID,
+            code    : 'com.vmware.vcloud.remoteaccess.applet.RemoteAccess',
+            width   : 1,
+            height  : 1
+        };
+
+        var parameters = {
+            jnlp_href : remoteAppletLauncher.JNLP_PATH + remoteAppletLauncher.JNLP_NAME,
+            separate_jvm: true,
+            centerimage: true
+        };
+
+        //If the browser definitely supports Plugin2, skip fail-over option
+        if (!deployJava.isPlugin2()) {
+            /*
+             * This gets the currently used jar files from the jnlp file
+             * and creates a comma-separated list for use with the applet
+             * http://www.w3.org/TR/1999/REC-html401-19991224/struct/objects.html#edef-APPLET
+             */
+            // TODO: Add an error callback to report failure to user.
+            var archive_list = "";
+            $.ajax({
+                async: false,
+                cache: false,
+                url: remoteAppletLauncher.JNLP_PATH + remoteAppletLauncher.JNLP_NAME,
+                success: function(xml) {
+                    $(xml).find('jar').each(function(){
+                        archive_list += $(this).attr('href') + ",";
+                    });
+                }
+            });
+            attributes.archive = archive_list.slice(0,-1);
+            attributes.codebase = remoteAppletLauncher.JNLP_PATH;
+            attributes.mayscript = 'mayscript';
+            parameters.jnlp_href = remoteAppletLauncher.JNLP_NAME; //Because we have codebase set
+        }
+
+        var minimumVersion = '1.6';
+
+        deployJava.runApplet(attributes, parameters, minimumVersion);
+    }
+
+};
+
+/**
+ * Method called by flex to initialize applet.
+ * Initializes the java applet if not initialized already.
+ */
+function initApplet() {
+    if(!remoteAppletLauncher.isInitialized()) {
+       return remoteAppletLauncher.initialize();
+    }
+}
+
+/**
+ * Method called by flex to perform login.
+ * initializeApplet() method should be called before calling login.
+ */
+function remoteVCDLogin(url,username,password,organization,sysAdminMode) {
+    if(!remoteAppletLauncher.isInitialized()) {
+        return false;
+    }
+    return login(url,username,password,organization,sysAdminMode);
+}
+
+/**
+ * Method that actually calls the login method on the applet.
+ * @returns true if login successful
+ * false if login fails
+ */
+function login(url,username,password,organization,sysAdminMode){
+    remoteAppletLauncher.getApplet().login(url,username,password,organization,sysAdminMode);
+}
+
+/**
+ * Callback method for login call
+ */
+function loginCallback(returnObj){
+    var loggedIn = returnObj;
+    document.getElementById('application').loginCallback(loggedIn);
+}
+
+/**
+ * Method that makes the call on java applet to fetch the list of org vdcs
+ */
+function getOrgVDCList(){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    var vdcList = remoteAppletLauncher.getApplet().getOrgVDCList();
+    return vdcList;
+}
+
+/**
+ * Call back method called by the java applet in response to the getOrgVDCList method.
+ * The java applet passes an object of type BasicEntityTypes.java
+ */
+function getOrgVDCListCallback(returnObj) {
+    var flexVDCList = new Array();
+    //get the list of org vdc objects. Its a simple name, id pair
+    var vdcList = returnObj.getEntityList();
+    for (i=0; i<vdcList.length; i++){
+        var object = new Object();
+        object.name = vdcList[i].getName();
+        object.id = vdcList[i].getId();
+        flexVDCList.push(object);
+    }
+    document.getElementById('application').getOrgVDCListCallback(flexVDCList);
+}
+
+/**
+ * Method that places the getOrgVDCGateways call on the java applet
+ */
+function getOrgVDCGateways(vdcHref){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    remoteAppletLauncher.getApplet().getOrgVDCGateways(vdcHref);
+}
+
+/**
+ * Callback method for getOrgVDCGateways() call. The java applet calls this method with a
+ * a BasicEntityTypes object. We then iterate over the entities by calling getEntityList()
+ * on the returned object.
+ */
+function getOrgVDCGatewayListCallback(returnObj) {
+    var flexVDCGWList = new Array();
+    var gwList = returnObj.getEntityList();
+    for (i=0; i<gwList.length; i++){
+        var object = new Object();
+        object.name = gwList[i].getName();
+        object.id = gwList[i].getId();
+        flexVDCGWList.push(object);
+    }
+    document.getElementById('application').getOrgVDCGatewayListCallback(flexVDCGWList);
+}
+
+/**
+ * Method that places the getRemoteGatewaySpec() call on the java applet.
+ */
+function getRemoteGatewaySpec(gwHref){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    remoteAppletLauncher.getApplet().getRemoteGatewaySpec(gwHref);
+}
+
+/**
+ * Callback method for getRemoteGatewaySpec(). The java applet calls this method with
+ * a object of RemoteGatewaySpec type.
+ */
+function getRemoteGatewaySpecCallback(returnObj) {
+    var obj = new Object();
+    obj.name = returnObj.getName();
+    obj.entityRef = new Object();
+    obj.entityRef.id = returnObj.getHref();
+    //fetch and set all the interfaces
+    var interfaces = returnObj.getInterfaces();
+    obj.interfaces = new Array();
+    for (x=0;x<interfaces.size();x++) {
+            var gwInterface = interfaces.get(x);
+            var intf = new Object();
+            intf.name = gwInterface.getName();
+            intf.displayName = gwInterface.getDisplayName();
+            intf.intfType = gwInterface.getInterfaceType();
+            intf.subnetParticipation = new Array();
+            var intfSubnets = gwInterface.getSubnetParticipation();
+            for(i=0;i<intfSubnets.size();++i){
+                var intfSubnet = intfSubnets.get(i);
+                var subnet = new Object();
+                subnet.gateway = intfSubnet.getGateway();
+                subnet.netmask = intfSubnet.getNetmask();
+                subnet.ipAddress = intfSubnet.getIpAddress();
+                intf.subnetParticipation.push(subnet);
+            }
+            intf.entityRef = new Object();
+            intf.entityRef.id = gwInterface.getNetwork().getHref();
+            intf.entityRef.name = gwInterface.getNetwork().getName();
+            obj.interfaces.push(intf);
+        }
+
+
+    var ipsecVPNSpec = returnObj.getIpSecVpnService();
+    if(ipsecVPNSpec != null){
+        //set the endpoints
+        obj.endpoints = new Array();
+        var endpoints = ipsecVPNSpec.getEndpoint();
+        for (x=0;x<endpoints.size(); x++){
+            var endpoint = endpoints.get(x);
+            var jsEndPoint = new Object();
+            jsEndPoint.publicIP= endpoint.getPublicIp();
+            jsEndPoint.networkName = endpoint.getNetwork().getName();
+            jsEndPoint.networkHref = endpoint.getNetwork().getHref();
+            jsEndPoint.networkId = endpoint.getNetwork().getId();
+            obj.endpoints.push(jsEndPoint);
+        }
+        if(ipsecVPNSpec.isIsEnabled()){
+            obj.ipsecVPNSpecEnabled = true;
+        }else {
+            obj.ipsecVPNSpecEnabled = false;
+        }
+
+        //set the tunnels
+        obj.tunnels = new Array();
+        var tunnels = returnObj.getTunnels();
+        for (x=0;x<tunnels.size(); x++){
+            var tunnel = tunnels.get(x);
+            var jsTunnel = new Object();
+
+            jsTunnel.name = tunnel.getName();
+            jsTunnel.description = tunnel.getDescription();
+            //set the peer
+            jsTunnel.peer = new Object();
+            jsTunnel.peerType = tunnel.getPeerType();
+            jsTunnel.peer.id = tunnel.getPeerid();
+            jsTunnel.peer.name = tunnel.getPeername();
+            jsTunnel.peer.vcdUrl = tunnel.getVcdUrl();
+            jsTunnel.peer.vcdOrg = tunnel.getVcdOrganization();
+            jsTunnel.peer.vcdUsername = tunnel.getVcdUsername();
+            //set the local and peer ip addresses
+            jsTunnel.peerIpAddress= tunnel.getPeerIpAddress();
+            jsTunnel.localIpAddress = tunnel.getLocalIpAddress();
+            //local and peer subnets
+            jsTunnel.localSubnets = new Array();
+            jsTunnel.peerSubnets = new Array();
+            var localSubnets = tunnel.getLocalSubnet();
+            var peerSubnets = tunnel.getPeerSubnet();
+            //fill in local subnets
+            for(i=0;i<localSubnets.size();i++){
+                var jsLocalSubnet = new Object();
+                var localSubnet = localSubnets.get(i);
+                jsLocalSubnet.name = localSubnet.getName();
+                jsLocalSubnet.gateway = localSubnet.getGateway();
+                jsLocalSubnet.netmask = localSubnet.getNetmask();
+                jsTunnel.localSubnets.push(jsLocalSubnet);
+            }
+            //fill in peer subnets.
+            for(i=0;i<peerSubnets.size();i++){
+                var jsPeerSubnet = new Object();
+                var peerSubnet = peerSubnets.get(i);
+                jsPeerSubnet.name = peerSubnet.getName();
+                jsPeerSubnet.gateway = peerSubnet.getGateway();
+                jsPeerSubnet.netmask = peerSubnet.getNetmask();
+                jsTunnel.peerSubnets.push(jsPeerSubnet);
+            }
+
+            jsTunnel.sharedSecret = tunnel.getSharedSecret();
+            jsTunnel.encryptionProtocol = tunnel.getEncryptionProtocol();
+            jsTunnel.mtu = tunnel.getMtu();
+            if(tunnel.getIsEnabled()){
+                jsTunnel.isEnabled = true;
+            }else {
+                jsTunnel.isEnabled = false;
+            }
+            if(tunnel.getIsOperational()){
+                jsTunnel.isOperational = true;
+            }else {
+                jsTunnel.isOperational = false;
+            }
+
+            jsTunnel.errorDetails = tunnel.getErrorDetails();
+            obj.tunnels.push(jsTunnel);
+        }
+    }
+    document.getElementById('application').getRemoteGatewaySpecCallback(obj);
+}
+
+/**
+ * Method that places the saveTunnel call on the java applet
+ */
+function saveTunnel(href, tunnel, localSubnets, peerSubnets, psk){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    remoteAppletLauncher.getApplet().saveTunnel(href,tunnel,localSubnets,peerSubnets,psk);
+}
+
+/**
+ * Method that places the deleteTunnel call on the java applet
+ */
+function deleteTunnel(href,tunnel){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    remoteAppletLauncher.getApplet().deleteTunnel(href,tunnel);
+}
+
+/**
+ * Calls commitConfiguration method on the java applet
+ */
+function commitConfiguration(){
+    if(!remoteAppletLauncher.isInitialized){
+        return null;
+    }
+    remoteAppletLauncher.getApplet().commitConfiguration();
+}
+
+/**
+ * Hides the applet
+ */
+function hideApplet() {
+    if (document.getElementById('rsAppletContainer') != null) {
+        document.getElementById('rsAppletContainer').style.visibility = "hidden";
+    }
+}
+
+/**
+ * Method that destroys the applet if it exists.
+ */
+function destroyAppletIfExists() {
+    if (document.getElementById('rsAppletContainer') != null) {
+        document.getElementById('rsAppletContainer').innerHTML = "";
+        remoteAppletLauncher.INITIALIZED = false;
+    }
+}
+
+/**
+ * Method that informs flex of any errors
+ */
+function reportError(errorCode,errorDetails) {
+    document.getElementById('application').reportError(errorCode,errorDetails);
+}qNLx9      XŠ¢gXŠ¢g=_PüX 9   c    :https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/remoteaccess.js necko:classified 1 strongly-framed 1 security-info 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 request-method GET response-head HTTP/1.1 200 OK
+Date: Fri, 27 Jan 2017 01:27:26 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=dd378b72-9d5e-4bdb-ada0-44adc00047dd
+Content-Type: application/x-javascript
+Last-Modified: Sun, 08 Jan 2017 03:36:08 GMT
+Content-Length: 15658
+Accept-Ranges: bytes
+ original-response-headers Date: Fri, 27 Jan 2017 01:27:26 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=dd378b72-9d5e-4bdb-ada0-44adc00047dd
+Content-Type: application/x-javascript
+Last-Modified: Sun, 08 Jan 2017 03:36:08 GMT
+Content-Length: 15658
+Accept-Ranges: bytes
+ uncompressed-len 0   =*

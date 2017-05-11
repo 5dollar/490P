@@ -1,0 +1,4 @@
+2017/05/10-14:15:33.097 2870 Reusing MANIFEST /home/it490/.config/google-chrome/Default/Service Worker/Database/MANIFEST-000001
+2017/05/10-14:15:33.097 2870 Recovering log #3
+2017/05/10-14:15:33.376 2870 (ignoring error) /home/it490/.config/google-chrome/Default/Service Worker/Database/000003.log: dropping 173 bytes; Corruption: missing start of fragmented record(2)
+2017/05/10-14:15:33.377 2870 Reusing old log /home/it490/.config/google-chrome/Default/Service Worker/Database/000003.log 

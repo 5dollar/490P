@@ -1,0 +1,183 @@
+
+
+
+
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="mul">
+        <head>
+            <title>VMware vCloud Director</title>
+            <link href="support/css/main.css" type="text/css" rel="stylesheet" />
+            <script src="support/javascript/jquery/jquery-1.3.2.min.js" type="text/javascript"></script>
+            <script src="support/javascript/upload.js" type="text/javascript"></script>
+            <script src="support/javascript/swfobject.js" type="text/javascript"></script>
+            <script src="support/javascript/swfaddress.js" type="text/javascript"></script>
+            <script src="support/javascript/associative-array.js" type="text/javascript"></script>
+            <script src="support/javascript/ConsoleController.js" type="text/javascript"></script>
+            <script src="support/javascript/remoteaccess.js" type="text/javascript"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_common.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_connection.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_base.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_factory.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_config.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_fileTransfer.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_logging.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_ovf.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_session.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_sspi.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_ui.js"></script>
+			<script type="text/javascript" src="support/javascript/assets/csd_api_flex.js"></script>
+            <script type="text/javascript">
+            // It is concatenated with swf url and used to refresh browser cache after upgrade. It should be changed for each version of VCD.
+            var VERSION_NUMBER = "5.1.0.741293";
+                function isSupportedBrowser() {
+                    if ($.browser.mozilla) {
+                        // vCloud supports FF 3 and later.
+                        if ($.browser.version.substr(0, 3) >= "1.9") {
+                            return true;
+                        }
+                    } else if ($.browser.msie) {
+                        // vCloud supports IE 7 and later.
+                        if (parseInt($.browser.version, 10) > 6) {
+                            return true;
+                        } else if ($.browser.version.substr(0, 3) == "6.0") {
+                            /*
+                             * jQuery has issue to detect the IE8 borwser on some scenarios.
+                             * For more informaiton, please see:
+                             *   http://blog.orite.com.au/tag/ie8/
+                             *
+                             * Since window.XMLHttpRequest was introduced in IE 7 and later, we
+                             * use this feature check to double verify if it's really a IE 6 or
+                             * not.
+                             */
+                            if (window.XMLHttpRequest) {
+                                // It's not IE 6, it should be IE 7 or later.
+                                return true;
+                            }
+                        }
+                    } else if (window.chrome) {
+                           return true;
+                    }
+
+                    return false;
+                }
+
+                function initializeFlash() {
+                    var cookieEnabled = false;
+                    document.cookie = "testCookie=; ";
+                    if (document.cookie.indexOf("testCookie") >= 0) {
+                        var cookieEnabled = true;
+                        var date = new Date();
+                        document.cookie = "testCookie=; expires=" + date.toString() + "; ";
+                    }
+                    if (cookieEnabled) {
+                        $("#busyDisplay").show();
+                        $("#browserWarning").hide();
+                        $("#flashWarning").hide();
+                        $("#cookieWarning").hide();
+                        $.ajax({ url: "support/flash/ui-vcloud-app-1.0.0.swf?v=" + VERSION_NUMBER,
+                                 cache: true,
+                                 type: "GET",
+                                 success: loadSwf,
+                                 error: loadSwf });
+                    } else {
+                        $("#browserWarning").hide();
+                        $("#flashWarning").hide();
+                        $("#cookieWarning").show();
+                    }
+                }
+
+                function setSwfFocus() {
+                    $("#application").focus();
+                }
+                function loadSwf() {
+                    $("#busyDisplay").hide();
+                    $("#browserWarning").hide();
+                    $("#flashWarning").show();
+                    $("#cookieWarning").hide();
+
+                    swfobject.embedSWF(
+                        "support/flash/ui-vcloud-app-1.0.0.swf?v=" + VERSION_NUMBER,
+                        "flashContainer",
+                        "100%", "100%",
+                        "10.1.0",
+                        "support/flash/expressInstall.swf",
+                        {locale:"en_US"},
+
+                            { allowScriptAccess: "sameDomain" },
+
+                            { id: "application", name: "application" });
+                }
+
+                function onPageLoad() {
+                    frameBuster();
+                    if (isSupportedBrowser()) {
+                        initializeFlash();
+                    } else {
+                        $("#browserWarning").show();
+                        $("#flashWarning").hide();
+                        $("#cookieWarning").hide();
+                    }
+                }
+
+                function frameBuster() {
+                    var disallowUIEmbedding = true;
+                    if (disallowUIEmbedding) {
+                        if (self == top) {
+                            $("body").show();
+                        } else {
+                            top.location = self.location;
+                        }
+                    } else {
+                        $("body").show();
+                    }
+                }
+
+                function setUploadFilePath(filePath, reqHwVersion, ovfError) {
+                    document.getElementById("application").setUploadFilePath(filePath, reqHwVersion, ovfError);
+                }
+
+                $(document).ready(onPageLoad);
+            </script>
+            <link rel="shortcut icon" href="favicon.ico" />
+        </head>
+        <!-- deployJava:
+         original: http://www.java.com/js/deployJava.js
+         put in body, not head, since it contains document.write -->
+        <script src="support/javascript/deployJava.js" type="text/javascript"></script>
+        <body style="display:none">
+            <div id="container" style="width:0px; height:0px">
+                <!-- Holds Client Support Plugin instances -->
+            </div>
+            <div class="flashContainer" id="flashContainer">
+                <div class="loading" style="display: none" id="busyDisplay">
+                    <img src="support/images/busy.gif" />Downloading...
+                </div>
+                <div class="warnings">
+                    <div class="alternativeContent" style="display: none" id="browserWarning">
+                        <b>Warning: </b>This browser will not work with vCloud Director. The vCloud Director Console requires Microsoft Internet Explorer 7 or higher or Firefox 3 or higher or Google Chrome. <a href=javascript:initializeFlash()>Continue anyway.</a>
+                    </div>
+                    <div class="alternativeContent" style="display: none" id="flashWarning">
+                        <a href="https://get.adobe.com/flashplayer/">vCloud Director requires Adobe Flash Player</a>
+                    </div>
+                    <div class="alternativeContent" style="display: none" id="cookieWarning">
+                        vCloud Director requires that your browser enable cookies.
+                    </div>
+                </div>
+            </div>
+        </body>
+</html>
+çêÔ      XŠ¢gXŠ£]=_PP       A    :https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/ necko:classified 1 strongly-framed 1 security-info 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 request-method GET response-head HTTP/1.1 200 OK
+Date: Fri, 27 Jan 2017 01:29:11 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=0aa0a4b2-c38e-4ae2-a8cb-687f0390694f
+Content-Type: text/html;charset=UTF-8
+Content-Length: 8708
+ original-response-headers Date: Fri, 27 Jan 2017 01:29:11 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=0aa0a4b2-c38e-4ae2-a8cb-687f0390694f
+Content-Type: text/html;charset=UTF-8
+Content-Length: 8708
+ charset UTF-8 uncompressed-len 0 predictor::resource-count 22 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/css/main.css 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/jquery/jquery-1.3.2.min.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/upload.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/swfobject.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/swfaddress.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/associative-array.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/ConsoleController.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/remoteaccess.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_common.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_connection.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_base.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_factory.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_config.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_fileTransfer.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_logging.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_ovf.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_session.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_sspi.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_ui.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_flex.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/deployJava.js 1,1,1485480551,4096 predictor::https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/images/busy.gif 1,1,1485480551,4096   "

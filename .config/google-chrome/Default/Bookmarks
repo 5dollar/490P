@@ -1,0 +1,66 @@
+{
+   "checksum": "6c3fde0f0b5df684632bb411b7cdc38c",
+   "roots": {
+      "bookmark_bar": {
+         "children": [ {
+            "date_added": "13130443467164649",
+            "id": "6",
+            "meta_info": {
+               "last_visited_desktop": "13138776653264636"
+            },
+            "name": "RabbitMQ Management interface",
+            "type": "url",
+            "url": "http://127.0.0.1:15672/"
+         }, {
+            "date_added": "13130448005104059",
+            "id": "7",
+            "meta_info": {
+               "last_visited_desktop": "13138776657112305"
+            },
+            "name": "RabbitMQ - rabbitmqctl(1) manual page",
+            "type": "url",
+            "url": "https://www.rabbitmq.com/man/rabbitmqctl.1.man.html"
+         }, {
+            "date_added": "13131653593570056",
+            "id": "10",
+            "meta_info": {
+               "last_visited_desktop": "13138513606716506"
+            },
+            "name": "engineerOfLies (EngineerOfLies)",
+            "type": "url",
+            "url": "https://github.com/engineerOfLies"
+         }, {
+            "date_added": "13135301408762385",
+            "id": "13",
+            "meta_info": {
+               "last_visited_desktop": "13138513475225053"
+            },
+            "name": "git - the simple guide - no deep shit!",
+            "type": "url",
+            "url": "http://rogerdudler.github.io/git-guide/"
+         } ],
+         "date_added": "13130440970665171",
+         "date_modified": "13135301408762385",
+         "id": "1",
+         "name": "Bookmarks bar",
+         "type": "folder"
+      },
+      "other": {
+         "children": [  ],
+         "date_added": "13130440970665179",
+         "date_modified": "0",
+         "id": "2",
+         "name": "Other bookmarks",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [  ],
+         "date_added": "13130440970665179",
+         "date_modified": "0",
+         "id": "3",
+         "name": "Mobile bookmarks",
+         "type": "folder"
+      }
+   },
+   "version": 1
+}

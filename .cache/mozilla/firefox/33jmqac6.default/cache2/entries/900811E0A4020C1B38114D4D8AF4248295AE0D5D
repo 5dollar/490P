@@ -1,0 +1,435 @@
+/***********************************************************
+ * Copyright 2014 VMware, Inc.  All rights reserved.
+ *    -- VMware Confidential
+ ***********************************************************/
+
+// global
+var VMW_CSD_DEFAULT_WSS_PORT = 8093;
+var VMW_CSD_CONNECT_TRIES_SECONDS = 30; // 30 Seconds
+
+/**
+ * The connection object for a Web Socket Apis.
+ */
+function ApiConnection() {
+   // Instance
+   this._sessionId = null;
+   this._nextRequestId = 1;
+
+   // _apiLookup[componentId][objectId]
+   this._apiLookup = {};
+   this._apiByRequestId = {}; // If the object Id is not known then this map will be used
+   this._socket = null;
+   this.isOpenning = false;
+   this.isOpen = false;
+   this._connectFailCount = 0;
+   this.defaultCallback = null;
+   this.createApiInstance = true;
+
+   /**
+    * Establish a connection.
+    * @param args.appName (default 'ui')
+    * @param args.sessionId (default random uuid)
+    * @param args.port (default VMW_CSD_DEFAULT_WSS_PORT)
+    * @param args.retrySeconds (default VMW_CSD_CONNECT_TRIES_SECONDS)
+    */
+   this.open = function(args) {
+      this.appName = getFieldWithDefault(args, 'appName', 'ui');
+      this._sessionId = getFieldWithDefault(args, 'sessionId', null);
+      this._port = getFieldWithDefault(args, 'port', VMW_CSD_DEFAULT_WSS_PORT);
+      this._maxTrials = getFieldWithDefault(args, 'retrySeconds',
+            VMW_CSD_CONNECT_TRIES_SECONDS);
+      if (null == this._sessionId) {
+         this._sessionId = createVMwareUUID();
+      }
+      this.__callStartProtocolServer__();
+      this.__on_fail_handler__ = this.__on_lookup_fail__;
+      this.__on_connected_handler__ = this.__on_lookup_connected__;
+      this._connectFailCount = 0;
+      this.__openImpl__();
+   };
+
+   this.__open_protocol__ = function(port) {
+      this._port = port;
+      this.__on_fail_handler__ = this.__on_connect_fail__;
+      this.__on_connected_handler__ = this.__on_connected__;
+      this._maxTrials = 1; // Should not fail
+      this._connectFailCount = 0;
+      this.__openImpl__();
+   };
+
+   this.__openImpl__ = function() {
+      this.isOpenning = true;
+      this.__tryOpen__("wss", this._port);
+      setTimeout(this.__login_timer__.bind(this), 1000);
+   };
+
+   /**
+    * Internal method to establish a localhost web socket connection.
+    * The method can be either ws or wss.
+    */
+   this.__tryOpen__ = function(method, port) {
+      var me = this;
+      try {
+         var socket = new WebSocket(method + "://vmware-localhost:" + port + "/");
+         socket.onopen = function(evt) {
+            me._socket = socket;
+            me.__on_connected_handler__(evt);
+         };
+         onfail = function(evt) {
+            socket.onopen = null;
+            socket.onclose = null;
+            socket.onerror = null;
+            me.__on_fail_handler__(evt);
+         }
+         socket.onclose = onfail;
+         socket.onerror = onfail;
+      } catch (err) {
+         this.__on_fail_handler__({data:err.message});
+      }
+   };
+
+   /**
+    * Handles the connected event.
+    */
+   this.__on_lookup_connected__ = function(evt) {
+      this.isOpen = true;
+      this.isOpenning = false;
+      var me = this;
+      var socket = this._socket;
+      this._socket.onopen = null;
+      this._socket.onclose = function(evt) {
+         me.__close_socket__(socket);
+         if (me._socket == socket) {
+            me._socket = null;
+         }
+      };
+      this._socket.onmessage = function(evt) { me.__onmessage__(evt) };
+
+      // Give the protocol server, some time to start.
+      setTimeout(me.__init_session__.bind(this), 500);
+   };
+
+   this.__init_session__ = function() {
+      var sessionApi = this.getOrCreateApi("session");
+      // Passing csdService as a hack, since appName is required
+      // The lookup server does not use a keep alive, so passing false.
+      sessionApi.init({appName:this.appName, clientKeepAlive:false},
+            this.__on_protocol_session_init.bind(this));
+   };
+
+   this.__on_protocol_session_init = function(result, err) {
+      if (err) {
+         this.onApiError("Service init error code: " + err.statusCode);
+         return;
+      }
+      this.close();
+      this.__open_protocol__(result.port);
+   };
+
+   this.__callStartProtocolServer__ = function() {
+      var pUrl = 'vmware-csd://csd?sessionId=' + this._sessionId;
+      pUrl += '&appName=' + this.appName;
+
+      this.__startProtocolServer__(pUrl);
+   };
+
+   this.__startProtocolServer__ = function(url) {
+      if (getIEVersion() != null) {
+         var frm = document.getElementById('csdframe');
+         if (frm == null) {
+            frm = document.createElement("iframe");
+            frm.id = 'csdframe';
+            frm.name = 'csdframe';
+            frm.src = 'about:blank';
+            frm.style.display = 'none';
+            document.body.appendChild(frm);
+         }
+
+         frm.src = url;
+      } else {
+         var win = (window.parent)? window.parent : window;
+         win.location.assign(url);
+      }
+   };
+
+   /**
+    * Handles the connected event.
+    */
+   this.__on_connected__ = function(con_evt) {
+      this.isOpen = true;
+      this.isOpenning = false;
+      var me = this;
+      this._socket.onopen = null;
+      this._socket.onclose = function(evt) {
+         me.close();
+         fire(me.onclose, evt);
+      };
+      this._socket.onerror = function(evt) { fire(me.onerror, evt); };
+      this._socket.onmessage = function(evt) { me.__onmessage__(evt) };
+      this._sessionApi = this.getOrCreateApi("session");
+      fire(me.onopen, con_evt);
+      // Might need to do something different for H5, but this will
+      // work for flex which does not show different pages.
+      window.addEventListener('unload', this.__on_unload__.bind(this));
+   };
+
+   this.__on_unload__ = function(evt) {
+      // End the protocol server
+      this._sessionApi.remove();
+      // The browser is closed.
+      this.close();
+   };
+
+   /**
+    * Handles the connection failure event.
+    */
+   this.__on_connect_fail__ = function(evt) {
+      if (!this.isOpenning) {
+         // Already failed
+         return;
+      }
+      this.close();
+      fire(this.onclose, evt);
+   };
+
+   /**
+    * Handles the lookup sever connection failure event.
+    */
+   this.__on_lookup_fail__ = function(evt) {
+      // The timer will do the retry logic to avoid hitting the sever to often.
+   };
+
+   /**
+    * Handles handles connection timer.
+    */
+   this.__login_timer__ = function(evt) {
+      if (!this.isOpenning) {
+         return;
+      }
+      if (this._socket == null) {
+         this.close();
+         // Not connected.
+         this._connectFailCount++;
+         if (this._connectFailCount < this._maxTrials) {
+            // try again - this can take a long time, since the user needs to accept the
+            // protocol handler warning dialogs or the protocol handler is not installed.
+            // TODO mvdb: Add code to detect if the protocol handler is installed.
+            this.__openImpl__();
+         } else {
+            fire(this.onclose, evt);
+         }
+      }
+   };
+
+   /**
+    * Override in local instance to handle connection open event.
+    */
+   this.onopen = function(evt) { };
+
+   /**
+    * Override in local instance to handle connection close event.
+    */
+   this.onclose = function (evt) { };
+
+   /**
+    * Override to handle a connection error.
+    */
+   this.onerror = function(evt) {
+      alert("Connection Error: " + evt.data);
+   };
+
+   /**
+    * Override in local instance to handle unknown Api Error.
+    */
+   this.onApiError = function(msg) {
+      alert("Api Error: " + msg);
+   };
+
+   /**
+    * Internal method to verify and send web socket message.
+    */
+   this.__send__ = function (msg, api) {
+      if (!this._socket) {
+         return;
+      }
+      if (!msg.method) {
+         this.onApiError("A method is required.");
+         return;
+      }
+      if (!msg.requestId) {
+         this.onApiError("A requestId is required.");
+         return;
+      }
+      if (!msg.sessionId && this._sessionId) {
+         msg.sessionId = this._sessionId;
+      }
+      if (msg.method == "free") {
+         this.getApi(msg, "delete");
+         delete this._apiByRequestId[msg.requestId];
+      } else {
+         this.__registerApi__(msg, api);
+      }
+      this._socket.send(JSON.stringify(msg));
+
+      if (this._sessionApi) {
+         this._sessionApi.__delayKeepAlive__();
+      }
+   };
+
+   this.__close_socket__ = function(socket) {
+      if (socket == null) {
+         return;
+      }
+      socket.onopen = null;
+      socket.onclose = null;
+      socket.onerror = null;
+   };
+
+   /**
+    * Closes the web socket.
+    */
+   this.close = function() {
+      if (this._socket != null) {
+         if (this.isOpen) {
+            this._socket.close();
+         }
+         this.__close_socket__(this._socket);
+         this._socket = null;
+      }
+      this.isOpen = false;
+      this.isOpenning = false;
+      this._apiByObjectId = {};
+      this._apiByRequestId = {};
+   };
+
+   /**
+    * Get the next request id.
+    */
+   this.getNextRequestId = function() {
+      return (this._nextRequestId++).toString();
+   };
+
+   /**
+    * @param op Operation - create or delete or none
+    */
+   this.getApi = function(msg, op) {
+      if (msg == null) {
+         return null;
+      }
+      var objectId = msg.requestObjectId || msg.objectId;
+      if (objectId == null) {
+         throw new Error("objectId is required");
+      }
+      var objects = this.__getApiObjects__(msg);
+      var api = objects[objectId];
+      if (api == null && op == 'create') {
+         var componentId = msg.requestComponentId || msg.componentId;
+         api = ClientSupportApiFactory.createApi(componentId, this);
+         this.__registerApi__(msg, api);
+      }
+      if (api != null && op == 'delete') {
+         delete objects[msg.objectId];
+      }
+      return api;
+   };
+
+   /**
+    * @param msg Message used to get componentId.
+    */
+   this.__getApiObjects__ = function(msg) {
+      if (msg == null) {
+         return null;
+      }
+      var componentId = msg.requestComponentId || msg.componentId;
+      if (componentId == null) {
+         throw new Error("componentId is required");
+      }
+      var objects = this._apiLookup[componentId];
+      if (objects == null) {
+         this._apiLookup[componentId] = objects = {};
+      }
+      return objects;
+   };
+
+   this.__registerApi__ = function(msg, api) {
+      if (msg == null || api == null) {
+         return;
+      }
+      var objectId = msg.requestObjectId || msg.objectId;
+      if (objectId == null) {
+         this._apiByRequestId[msg.requestId] = api;
+         return;
+      }
+      var objects = this.__getApiObjects__(msg);
+      objects[objectId] = api;
+      api.objectId = msg.objectId;
+   };
+
+   this.getOrCreateApi = function(componentId, objectId) {
+      if (null == objectId) {
+         objectId = componentId;
+      }
+      return this.getApi(
+            {componentId:componentId, objectId:objectId},
+            'create');
+   };
+
+   /**
+    * Handles a message from the server.
+    * Finds the source api object and dispatches the message to it.
+    */
+   this.__onmessage__ = function (evt) {
+      var msg = JSON.parse(evt.data);
+      var errorMessage = "";
+      if (!this._sessionId) {
+         this._sessionId = msg.sessionId;
+      }
+      if (this._sessionId != msg.sessionId) {
+         this.onApiError("Session id for the api connection '" + this._sessionId +
+               "' does not match the response '" + msg.sessionId + "'.");
+         return;
+      }
+      if (!msg.type) {
+         this.onApiError("The response had no type.");
+         return;
+      }
+      if (!msg.requestId) {
+         this.onApiError("There was no requestId in the response.");
+         return;
+      }
+      if (msg.type != "error") {
+         if (!msg.requestObjectId) {
+            this.onApiError("There was no requestObjectId in the response.");
+            return;
+         }
+      }
+      var api = null;
+      if (msg.requestId) {
+         api = this._apiByRequestId[msg.requestId];
+         if (api != null) {
+            delete this._apiByRequestId[msg.requestId];
+         }
+      }
+      if (api == null) {
+         api = this.getApi(msg, "none");
+      }
+
+      if (api != null) {
+         api.__onmessage__(msg);
+      }
+   };
+};
+¶AE§˜r      XŠ¢gXŠ¢g=_PüX 9   p    :https://vcloud0.coresys.njit.edu/cloud/org/njit-it-senesy-it430/support/javascript/assets/csd_api_connection.js necko:classified 1 strongly-framed 1 security-info FnhllAKWRHGAlo+ESXykKAAAAAAAAAAAwAAAAAAAAEaphjojH6pBabDSgSnsfLHeAAQAAgAAAAAAAAAAAAAAAAAAAAAB4vFIJp5wRkeyPxAQ9RJGKPqbqVvKO0mKuIl8ec8o/uhmCjImkVxP+7sgiYWmMt8FvcOXmlQiTNWFiWlrbpbqgwAAAAAAAAVyMIIFbjCCBFagAwIBAgIQD0dx+x7j0Q8as/yCn6gcljANBgkqhkiG9w0BAQsFADBwMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQuY29tMS8wLQYDVQQDEyZEaWdpQ2VydCBTSEEyIEhpZ2ggQXNzdXJhbmNlIFNlcnZlciBDQTAeFw0xNDA0MTYwMDAwMDBaFw0xNzA4MTgxMjAwMDBaMHUxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MQ8wDQYDVQQHEwZOZXdhcmsxKzApBgNVBAoTIk5ldyBKZXJzZXkgSW5zdGl0dXRlIG9mIFRlY2hub2xvZ3kxEzARBgNVBAMMCioubmppdC5lZHUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDviEj1URiTNKYX6zonRYIbiRSQdJ+vc6KzISq3voC7n6FvtYBOm571S2wPpHRovw8nod7En4d9PbXDH6aNeQ1FRhutwxf0JRXSWl6gpAc0ZoYayu4egwu4ZYyUrXg6t1NEMx7cS5kvventX1wenIFRB+bFoUj7MXe/PoOQY6/MzmcQN1mRnYQHGeYFyKi5tPi3WP+sOAmxjdRwhjcucM6BKB8mvHAWvSJa/0SHjb+CAp3BoJaY3YFElEd+euNwxT/gpmkcu761X432kQyoQjSJan9iIpl9X48RuckIdDDsTebZyZlvEMBk3NaMYz3RPSROGPahKOa3iC9TRoSyfzItAgMBAAGjggH9MIIB+TAfBgNVHSMEGDAWgBRRaP+QrwIHdTzM2WVkYqISuFlyOzAdBgNVHQ4EFgQU+Th4RqVFdfTDg1efLFQy3gydnnYwOQYDVR0RBDIwMIIKKi5uaml0LmVkdYIIbmppdC5lZHWCGHZjbG91ZDAuY29yZXN5cy5uaml0LmVkdTAOBgNVHQ8BAf8EBAMCBaAwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMHUGA1UdHwRuMGwwNKAyoDCGLmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9zaGEyLWhhLXNlcnZlci1nMi5jcmwwNKAyoDCGLmh0dHA6Ly9jcmw0LmRpZ2ljZXJ0LmNvbS9zaGEyLWhhLXNlcnZlci1nMi5jcmwwQgYDVR0gBDswOTA3BglghkgBhv1sAQEwKjAoBggrBgEFBQcCARYcaHR0cHM6Ly93d3cuZGlnaWNlcnQuY29tL0NQUzCBgwYIKwYBBQUHAQEEdzB1MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wTQYIKwYBBQUHMAKGQWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFNIQTJIaWdoQXNzdXJhbmNlU2VydmVyQ0EuY3J0MAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcNAQELBQADggEBAG8SdDKVKCsxWXuQl7DIQWkGRmPjepRJiyCWcdpnP2peiGs5KiP1DRzegbgfT+ge5BgDA0dZIjpYVG83vgjuoW1HDkIC7939Xd9Jbv6yDapEE4yoEmvT+GWHkZ6bKEFbzLngWLwQX1hrtgwoARWk6h8bZM4BS0D6gGECgdsTzAqvTyyRk6ls3lmQXAAavLvfspbB25qAAIlBqlicESbQ430IZB5WUdrL6XLtHHzNwgF2ktcb0lRCLAFr0M1/zgug7Zb2mx6wgSu8JtXlQY7LtmLh6uByUVQ84ZJAwRQziBTvAw2Ng6Z6QGx7e/FtGiemDCKWewHioUs4G//NnZ4V6pTAEwADAAAAAAEBAAA= request-method GET response-head HTTP/1.1 200 OK
+Date: Fri, 27 Jan 2017 01:27:26 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=5c931b5b-07b2-43a2-98b1-8039d67483f2
+Content-Type: application/x-javascript
+Last-Modified: Sun, 08 Jan 2017 03:36:08 GMT
+Content-Length: 12294
+Accept-Ranges: bytes
+ original-response-headers Date: Fri, 27 Jan 2017 01:27:26 GMT
+X-VMWARE-VCLOUD-REQUEST-ID: requestId=5c931b5b-07b2-43a2-98b1-8039d67483f2
+Content-Type: application/x-javascript
+Last-Modified: Sun, 08 Jan 2017 03:36:08 GMT
+Content-Length: 12294
+Accept-Ranges: bytes
+ uncompressed-len 0   0
